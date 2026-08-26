@@ -1,0 +1,745 @@
+---
+title: "Tugas Praktikum Pertemuan 1"
+author: "Aurelia Fury"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: false
+    theme: paper
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Tugas 
+
+1.  Setiap kelompok memilih satu data time series dengan panjang ≥ 500 periode.
+
+2.  Data dibagi rata ke setiap anggota; minimal 100 observasi per orang.
+
+3.  Terapkan metode pemulusan yang sudah dipelajari (SMA, DMA, SES, DES, atau Holt-Winters) pada bagian data masing-masing
+
+4.  Bandingkan kinerja metode dan tentukan metode terbaik untuk data tersebut menggunakan metrik akurasi (mis. SSE/MSE/RMSE/MAPE), lalu jelaskan alasannya secara singkat.
+
+## Library/Packages
+
+```{r}
+#install.packages("forecast")
+#install.packages("graphics")
+#install.packages("TTR")
+#install.packages("TSA")
+```
+
+```{r}
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+library("ggplot2")
+```
+
+## Impor Data
+
+Data yang digunakan adalah data **ISPU (Indeks Standar Pencemar Udara)** harian stasiun DKI1 (Bunderan HI), dengan variabel yang diramalkan adalah **PM10**. Data terdiri atas 112 observasi harian (8 September 2020 - 28 Desember 2020).
+
+```{r}
+library(rio) 
+data <- import("https://raw.githubusercontent.com/aureliafury/mpdw/refs/heads/main/Pertemuan%201/ispu_anggota_1.csv")
+
+# menampilkan 5 data pertama
+head(data)
+```
+
+## Eksplorasi Data
+
+`View()` : menampilkan data dalam bentuk tabel, `str()` : menampilkan struktur data, `dim()` : menampilkan dimensi data
+
+```{r}
+View(data)
+str(data)
+dim(data)
+```
+
+Mengubah data agar terbaca sebagai data deret waktu dengan fungsi `ts()`. Kolom yang digunakan adalah **pm10**.
+
+```{r}
+data.ts <- ts(data$pm10)
+data.ts
+```
+
+Menampilkan ringkasan data
+
+```{r}
+summary(data.ts)
+```
+
+Nilai PM10 pada data ini berkisar antara 17 hingga 79, dengan rata-rata 45,64 dan median 50. Rentang (range) yang cukup lebar antara kuartil 1 (36,75) dan kuartil 3 (56) mengindikasikan variasi harian PM10 yang cukup besar selama periode observasi.
+
+Membuat plot data deret waktu
+
+```{r}
+ts.plot(data.ts, xlab = "Periode (hari)", ylab = "PM10",
+        main = "Plot Deret Waktu PM10")
+points(data.ts)
+```
+
+Plot deret waktu menunjukkan data berfluktuasi di kisaran 40-60 pada sekitar 80 periode pertama, kemudian terlihat kecenderungan menurun tajam menuju periode-periode akhir (turun ke kisaran 20-30-an). Pola ini mengindikasikan adanya sedikit tren menurun pada bagian akhir data, meskipun secara umum data masih relatif fluktuatif/tidak sepenuhnya stasioner.
+
+## Single Moving Average & Double Moving Average
+
+### Pembagian Data
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji.
+
+```{r}
+# hitung jumlah data
+n <- nrow(data)
+
+# tentukan batas 80%
+n_train <- floor(0.8 * n)
+
+# bagi data
+training_ma <- data[1:n_train, ]
+testing_ma  <- data[(n_train + 1):n, ]
+
+# ubah ke time series
+train_ma.ts <- ts(training_ma$pm10)
+test_ma.ts  <- ts(testing_ma$pm10)
+```
+
+Eksplorasi data dilakukan pada keseluruhan data, data latih, serta data uji menggunakan plot data deret waktu.
+
+```{r}
+#eksplorasi keseluruhan data
+plot(data.ts, col = "red", main = "Plot semua data")
+points(data.ts)
+
+#eksplorasi data latih
+plot(train_ma.ts, col = "blue", main = "Plot data latih")
+points(train_ma.ts)
+
+#eksplorasi data uji
+plot(test_ma.ts, col = "blue", main = "Plot data uji")
+points(test_ma.ts)
+```
+
+Eksplorasi data juga dapat dilakukan menggunakan package `ggplot2`.
+
+```{r}
+ggplot() +
+  geom_line(data = training_ma, aes(x = seq_along(pm10), y = pm10, col = "Data Latih")) +
+  geom_line(data = testing_ma, aes(x = seq(n_train + 1, n), y = pm10, col = "Data Uji")) +
+  labs(x = "Periode Waktu", y = "PM10", color = "Legend") +
+  scale_colour_manual(name = "Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                       values = c("blue", "red")) +
+  theme_bw() + theme(legend.position = "bottom",
+                      plot.caption = element_text(hjust = 0.5, size = 12))
+```
+
+### Single Moving Average (SMA)
+
+Ide dasar dari Single Moving Average (SMA) adalah data suatu periode dipengaruhi oleh data periode sebelumnya. Metode pemulusan ini cocok digunakan untuk pola data stasioner atau konstan. Pemulusan menggunakan metode SMA dilakukan dengan fungsi `SMA()`. Dalam hal ini akan dilakukan pemulusan dengan parameter m = 4.
+
+```{r}
+data.sma <- SMA(train_ma.ts, n = 4)
+data.sma
+```
+
+Nilai pemulusan SMA baru muncul mulai periode ke-4 (karena membutuhkan 4 data sebelumnya), dan nilainya relatif lebih stabil (halus) dibanding data aslinya karena merupakan rata-rata dari 4 periode terakhir.
+
+Data pemulusan pada periode ke-t selanjutnya digunakan sebagai nilai peramalan pada periode ke t+1.
+
+```{r}
+data.ramal <- c(NA, data.sma)
+data.ramal #forecast 1 periode ke depan
+```
+
+Selanjutnya dilakukan peramalan sebanyak periode uji ke depan. Pada metode SMA, seluruh hasil peramalan untuk periode ke depan akan memiliki nilai yang sama dengan hasil ramalan satu periode ke depan.
+
+```{r}
+n_test <- nrow(testing_ma)
+
+data.gab <- cbind(
+  aktual    = c(data.ts),
+  pemulusan = c(data.sma, rep(NA, n_test)),
+  ramalan   = c(data.ramal, rep(data.ramal[length(data.ramal)], n_test - 1)))
+
+data.gab #forecast periode uji ke depan
+```
+
+Hasil pemulusan menggunakan metode SMA divisualisasikan sebagai berikut.
+
+```{r}
+ts.plot(data.ts, xlab = "Periode ", ylab = "PM10", main = "SMA N=4 Data PM10")
+points(data.ts)
+lines(data.gab[, 2], col = "green", lwd = 2)
+lines(data.gab[, 3], col = "red", lwd = 2)
+legend("topleft", c("data aktual", "data pemulusan", "data peramalan"),
+       lty = 8, col = c("black", "green", "red"), cex = 0.5)
+```
+
+Selanjutnya perhitungan akurasi dilakukan baik pada data latih maupun data uji. Perhitungan akurasi dilakukan dengan ukuran akurasi SSE, MSE, dan MAPE.
+
+```{r}
+#Menghitung nilai keakuratan data latih
+error_train.sma <- train_ma.ts - data.ramal[1:length(train_ma.ts)]
+
+SSE_train.sma  <- sum(error_train.sma[5:length(train_ma.ts)]^2)
+MSE_train.sma  <- mean(error_train.sma[5:length(train_ma.ts)]^2)
+MAPE_train.sma <- mean(abs((error_train.sma[5:length(train_ma.ts)] /
+                               train_ma.ts[5:length(train_ma.ts)]) * 100))
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, MAPE_train.sma))
+row.names(akurasi_train.sma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.sma) <- c("Akurasi m = 4")
+akurasi_train.sma
+```
+
+Pada data latih, metode SMA (m=4) menghasilkan SSE sebesar 7999,13, MSE 94,11, dan MAPE 16,71%. Nilai MAPE ini berada pada kisaran 10-20%, sehingga menurut kriteria umum tergolong **baik**.
+
+```{r}
+#Menghitung nilai keakuratan data uji
+error_test.sma <- test_ma.ts - data.gab[(n_train + 1):n, 3]
+SSE_test.sma  <- sum(error_test.sma^2)
+MSE_test.sma  <- mean(error_test.sma^2)
+MAPE_test.sma <- mean(abs((error_test.sma / test_ma.ts) * 100))
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma))
+row.names(akurasi_test.sma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.sma) <- c("Akurasi m = 4")
+akurasi_test.sma
+```
+
+Pada data uji, SMA menghasilkan SSE 1026,44, MSE 44,63, dan MAPE 22,58%. Nilai MAPE data uji sedikit lebih tinggi dibanding data latih (16,71% menjadi 22,58%), tetapi masih tergolong **cukup baik** (di bawah 25%). Ini menunjukkan SMA cukup mampu menggeneralisasi pola PM10 walau ada penurunan performa saat diuji pada data baru.
+
+### Double Moving Average (DMA)
+
+Metode DMA merupakan pengembangan dari metode SMA, yaitu proses pemulusan rata-rata bergerak dilakukan sebanyak dua kali.
+
+```{r}
+data.sma_ <- SMA(train_ma.ts, n = 4)
+data.dma  <- SMA(data.sma_, n = 4)
+
+At <- 2 * data.sma_ - data.dma
+Bt <- (2 / (4 - 1)) * (data.sma_ - data.dma)
+data.ramal2 <- At + Bt
+
+t  <- 1:n_test
+f  <- c()
+for (i in t) {
+  f[i] <- At[length(At)] + Bt[length(Bt)] * (i)
+}
+data.gab2 <- cbind(aktual = c(data.ts),
+                    pemulusan1 = c(data.sma_, rep(NA, n_test)),
+                    pemulusan2 = c(data.dma, rep(NA, n_test)),
+                    At = c(At, rep(NA, n_test)),
+                    Bt = c(Bt, rep(NA, n_test)),
+                    ramalan = c(data.ramal2, f))
+data.gab2
+```
+
+Hasil pemulusan menggunakan metode DMA divisualisasikan sebagai berikut.
+
+```{r}
+ts.plot(data.ts, xlab = "Periode ", ylab = "PM10", main = "DMA N=4 Data PM10")
+points(data.ts)
+lines(data.gab2[, 3], col = "green", lwd = 2)
+lines(data.gab2[, 6], col = "red", lwd = 2)
+legend("topleft", c("data aktual", "data pemulusan", "data peramalan"),
+       lty = 8, col = c("black", "green", "red"), cex = 0.5)
+```
+
+Selanjutnya perhitungan akurasi dilakukan baik pada data latih maupun data uji.
+
+```{r}
+#Menghitung nilai keakuratan data latih
+error_train.dma <- train_ma.ts - data.ramal2[1:length(train_ma.ts)]
+
+SSE_train.dma  <- sum(error_train.dma[8:length(train_ma.ts)]^2)
+MSE_train.dma  <- mean(error_train.dma[8:length(train_ma.ts)]^2)
+MAPE_train.dma <- mean(abs((error_train.dma[8:length(train_ma.ts)] /
+                               train_ma.ts[8:length(train_ma.ts)]) * 100))
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, MAPE_train.dma))
+row.names(akurasi_train.dma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.dma) <- c("Akurasi m = 4")
+akurasi_train.dma
+```
+
+Pada data latih, DMA menghasilkan SSE 4383,92, MSE 53,46, dan MAPE 13,70%. Nilai ini **lebih baik** dibanding SMA pada data latih (MAPE SMA 16,71% > MAPE DMA 13,70%), karena DMA mampu menangkap komponen tren pada data selain levelnya.
+
+```{r}
+#Menghitung nilai keakuratan data uji
+error_test.dma <- test_ma.ts - data.gab2[(n_train + 1):n, 6]
+SSE_test.dma  <- sum(error_test.dma^2)
+MSE_test.dma  <- mean(error_test.dma^2)
+MAPE_test.dma <- mean(abs((error_test.dma / test_ma.ts) * 100))
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, MAPE_test.dma))
+row.names(akurasi_test.dma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.dma) <- c("Akurasi m = 4")
+akurasi_test.dma
+```
+
+Pada data uji, performa DMA justru **jauh memburuk** dengan SSE 29080,53, MSE 1264,37, dan MAPE 125,43% (MAPE di atas 100%, tergolong sangat buruk). Hal ini terjadi karena metode DMA mengekstrapolasi tren linear dari akhir periode data latih (yang saat itu sedang menurun tajam) secara terus-menerus ke depan, sehingga hasil ramalan terus turun bahkan menjadi tidak masuk akal dibanding data aktual PM10 pada periode uji.
+
+**Kesimpulan SMA vs DMA:** pada data latih, DMA lebih unggul karena mampu menangkap tren. Namun pada data uji, SMA jauh lebih stabil dan akurat (MAPE 22,58%) dibanding DMA yang MAPE-nya melonjak menjadi 125,43%. Ini menunjukkan DMA mengalami **overfitting** terhadap tren jangka pendek di akhir data latih sehingga generalisasinya buruk. Dengan demikian, **SMA (m=4) adalah pilihan yang lebih baik** dibanding DMA untuk meramalkan PM10 pada data ini.
+
+## Single Exponential Smoothing & Double Exponential Smoothing
+
+Metode Exponential Smoothing merupakan metode pemulusan deret waktu dengan memberikan bobot yang menurun secara eksponensial pada data historis, di mana nilai terbaru mendapat bobot lebih besar dibanding nilai yang lebih lama.
+
+### Pembagian Data
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji (sama seperti sebelumnya).
+
+```{r}
+training <- data[1:n_train, ]
+testing  <- data[(n_train + 1):n, ]
+
+train.ts <- ts(training$pm10)
+test.ts  <- ts(testing$pm10)
+```
+
+### Eksplorasi
+
+Eksplorasi dilakukan dengan membuat plot data deret waktu untuk keseluruhan data, data latih, dan data uji.
+
+```{r}
+plot(data.ts, col = "black", main = "Plot semua data")
+points(data.ts)
+
+plot(train.ts, col = "red", main = "Plot data latih")
+points(train.ts)
+
+plot(test.ts, col = "blue", main = "Plot data uji")
+points(test.ts)
+```
+
+## Single Exponential Smoothing
+
+Single Exponential Smoothing (SES) merupakan metode pemulusan yang tepat digunakan untuk data dengan pola stasioner atau konstan. Pemulusan dilakukan dengan fungsi `HoltWinters()`.
+
+```{r}
+# SES dengan alpha = 0.2
+ses1 <- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.2)
+plot(ses1)
+
+ramalan1 <- forecast(ses1, h = n_test)
+ramalan1
+```
+
+Karena SES tidak memodelkan tren, seluruh titik ramalan untuk 23 periode ke depan bernilai konstan, yaitu 33,12 (dengan interval kepercayaan yang melebar seiring bertambahnya horizon peramalan).
+
+```{r}
+# SES dengan alpha = 0.7
+ses2 <- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses2)
+
+ramalan2 <- forecast(ses2, h = n_test)
+ramalan2
+```
+
+Dengan alpha yang lebih besar (0,7), bobot terhadap observasi terakhir menjadi lebih besar sehingga nilai ramalan konstannya berubah menjadi 30,27, sedikit lebih rendah dari alpha=0,2 dan lebih mendekati level PM10 pada akhir data latih.
+
+Nilai parameter alpha dapat dioptimalkan menyesuaikan dari error-nya paling minimum, dengan membuat argumen alpha = NULL.
+
+```{r}
+HWopt <- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = NULL)
+HWopt
+
+ramalanopt <- forecast(HWopt, h = n_test)
+ramalanopt
+```
+
+Nilai alpha optimum yang dihasilkan adalah 0,508 (di antara 0,2 dan 0,7), dengan nilai ramalan konstan sebesar 30,55, mirip dengan hasil pada alpha=0,7.
+
+### Akurasi Data Latih
+
+```{r}
+# alpha = 0.2
+SSE1  <- ses1$SSE
+MSE1  <- ses1$SSE / length(train.ts)
+RMSE1 <- sqrt(MSE1)
+
+akurasi1 <- matrix(c(SSE1, MSE1, RMSE1))
+row.names(akurasi1) <- c("SSE", "MSE", "RMSE")
+colnames(akurasi1) <- c("Akurasi alpha=0.2")
+akurasi1
+```
+
+```{r}
+# alpha = 0.7
+SSE2  <- ses2$SSE
+MSE2  <- ses2$SSE / length(train.ts)
+RMSE2 <- sqrt(MSE2)
+
+akurasi2 <- matrix(c(SSE2, MSE2, RMSE2))
+row.names(akurasi2) <- c("SSE", "MSE", "RMSE")
+colnames(akurasi2) <- c("Akurasi alpha=0.7")
+akurasi2
+```
+
+```{r}
+# alpha optimum
+SSEopt  <- HWopt$SSE
+MSEopt  <- HWopt$SSE / length(train.ts)
+RMSEopt <- sqrt(MSEopt)
+
+akurasiopt <- matrix(c(SSEopt, MSEopt, RMSEopt))
+row.names(akurasiopt) <- c("SSE", "MSE", "RMSE")
+colnames(akurasiopt) <- c("Akurasi optimum")
+akurasiopt
+```
+
+Pada data latih, ketiga model SES menghasilkan RMSE yang relatif berdekatan: alpha=0,2 (RMSE 9,31), alpha=0,7 (RMSE 8,90), dan alpha optimum (RMSE 8,78). Model dengan alpha optimum memberikan hasil **terbaik** pada data latih karena RMSE-nya paling kecil.
+
+### Akurasi Data Uji
+
+```{r}
+# jumlah observasi uji
+n_test2 <- nrow(testing)
+
+e1   <- as.numeric(ramalan1$mean)[1:n_test2] - as.numeric(testing$pm10)
+e2   <- as.numeric(ramalan2$mean)[1:n_test2] - as.numeric(testing$pm10)
+eopt <- as.numeric(ramalanopt$mean)[1:n_test2] - as.numeric(testing$pm10)
+
+SSEtesting1  <- sum(e1^2,  na.rm = TRUE)
+MSEtesting1  <- mean(e1^2, na.rm = TRUE)
+RMSEtesting1 <- sqrt(MSEtesting1)
+
+SSEtesting2  <- sum(e2^2,  na.rm = TRUE)
+MSEtesting2  <- mean(e2^2, na.rm = TRUE)
+RMSEtesting2 <- sqrt(MSEtesting2)
+
+SSEtestingopt  <- sum(eopt^2,  na.rm = TRUE)
+MSEtestingopt  <- mean(eopt^2, na.rm = TRUE)
+RMSEtestingopt <- sqrt(MSEtestingopt)
+
+akurasitesting_SES <- data.frame(
+  Model = c("alpha=0.2", "alpha=0.7", "alpha optimum"),
+  SSE   = c(SSEtesting1, SSEtesting2, SSEtestingopt),
+  MSE   = c(MSEtesting1, MSEtesting2, MSEtestingopt),
+  RMSE  = c(RMSEtesting1, RMSEtesting2, RMSEtestingopt)
+)
+akurasitesting_SES
+```
+
+Pada data uji, urutannya sedikit berubah: alpha=0,7 memberikan RMSE terkecil (6,69), disusul alpha optimum (RMSE 6,79), lalu alpha=0,2 (RMSE 8,11). Artinya, model dengan alpha=0,7 (dan alpha optimum yang nilainya berdekatan, yaitu 0,508) memberikan hasil peramalan yang **paling akurat** pada data uji, karena bobot yang lebih besar pada observasi terbaru ternyata lebih sesuai dengan karakteristik data PM10 yang cukup fluktuatif ini. Secara keseluruhan, **model SES dengan alpha optimum (≈0,508)** dipilih sebagai model SES terbaik karena performanya konsisten baik pada data latih maupun data uji.
+
+## Double Exponential Smoothing (DES)
+
+Metode DES digunakan untuk data yang memiliki pola tren. Metode ini merupakan pengembangan SES, dilakukan dua kali pemulusan, yaitu untuk tahap 'level' dan tahap 'tren'.
+
+```{r}
+#alpha=0.2, beta=0.2
+des.1 <- HoltWinters(train.ts, gamma = FALSE, beta = 0.2, alpha = 0.2)
+plot(des.1)
+
+ramalandes1 <- forecast(des.1, h = n_test)
+ramalandes1
+```
+
+Karena DES memodelkan komponen tren, hasil ramalan tidak lagi konstan seperti SES. Dengan alpha=0,2;beta=0,2, tren yang tertangkap justru **negatif dan cukup curam**, sehingga nilai ramalan terus menurun bahkan menjadi negatif (tidak masuk akal untuk data PM10) mulai periode ke-11 uji. Ini mengindikasikan parameter ini kurang cocok untuk data PM10.
+
+```{r}
+#alpha=0.6, beta=0.3
+des.2 <- HoltWinters(train.ts, gamma = FALSE, beta = 0.3, alpha = 0.6)
+plot(des.2)
+
+ramalandes2 <- forecast(des.2, h = n_test)
+ramalandes2
+```
+
+Dengan alpha=0,6;beta=0,3, tren yang tertangkap justru sedikit positif dan landai, sehingga nilai ramalan naik perlahan dari 30,59 menuju 35,78 pada akhir periode uji, jauh lebih realistis dibanding kombinasi parameter sebelumnya.
+
+Nilai parameter alpha dan beta dapat dioptimalkan menyesuaikan errornya, dengan membuat argumen alpha dan beta menjadi NULL.
+
+```{r}
+des.opt <- HoltWinters(train.ts, gamma = FALSE)
+des.opt
+
+ramalandesopt <- forecast(des.opt, h = n_test)
+ramalandesopt
+```
+
+Parameter optimum yang diperoleh adalah alpha=0,558 dan beta=0,028 (beta yang kecil), dengan komponen tren negatif (-0,678) yang diekstrapolasi terus-menerus sehingga nilai ramalan menurun dari 29,31 menjadi 14,40 pada akhir periode uji.
+
+Perbandingan plot data latih dan hasil pemulusan.
+
+```{r}
+plot(data.ts)
+lines(des.1$fitted[, 1], lty = 2, col = "blue")
+lines(ramalandes1$mean, col = "red")
+```
+
+### Akurasi Data Latih
+
+```{r}
+SSE.des1  <- des.1$SSE
+MSE.des1  <- des.1$SSE / length(train.ts)
+RMSE.des1 <- sqrt(MSE.des1)
+
+SSE.des2  <- des.2$SSE
+MSE.des2  <- des.2$SSE / length(train.ts)
+RMSE.des2 <- sqrt(MSE.des2)
+
+SSE.desopt  <- des.opt$SSE
+MSE.desopt  <- des.opt$SSE / length(train.ts)
+RMSE.desopt <- sqrt(MSE.desopt)
+
+akurasi_des_train <- data.frame(
+  Model = c("alpha=0.2;beta=0.2", "alpha=0.6;beta=0.3", "optimum"),
+  SSE   = c(SSE.des1, SSE.des2, SSE.desopt),
+  MSE   = c(MSE.des1, MSE.des2, MSE.desopt),
+  RMSE  = c(RMSE.des1, RMSE.des2, RMSE.desopt)
+)
+akurasi_des_train
+```
+
+Pada data latih, parameter optimum (alpha=0,558;beta=0,028) memberikan RMSE terkecil (8,99), sedikit lebih baik dibanding alpha=0,2;beta=0,2 (RMSE 9,85) dan alpha=0,6;beta=0,3 (RMSE 9,79).
+
+### Akurasi Data Uji
+
+```{r}
+ed1   <- as.numeric(ramalandes1$mean)[1:n_test2] - as.numeric(testing$pm10)
+ed2   <- as.numeric(ramalandes2$mean)[1:n_test2] - as.numeric(testing$pm10)
+edopt <- as.numeric(ramalandesopt$mean)[1:n_test2] - as.numeric(testing$pm10)
+
+akurasi_des_test <- data.frame(
+  Model = c("alpha=0.2;beta=0.2", "alpha=0.6;beta=0.3", "optimum"),
+  SSE   = c(sum(ed1^2, na.rm = TRUE), sum(ed2^2, na.rm = TRUE), sum(edopt^2, na.rm = TRUE)),
+  MSE   = c(mean(ed1^2, na.rm = TRUE), mean(ed2^2, na.rm = TRUE), mean(edopt^2, na.rm = TRUE))
+)
+akurasi_des_test
+```
+
+Pada data uji, hasilnya sangat kontras dengan hasil di data latih. Parameter alpha=0,2;beta=0,2 (yang forecast-nya sempat negatif) memberikan MSE **sangat buruk** (1085,78). Sebaliknya, alpha=0,6;beta=0,3 justru memberikan MSE **terkecil** (71,72), diikuti parameter optimum (MSE 89,39). Ini menunjukkan bahwa parameter "optimum" hasil optimisasi `HoltWinters()` (yang meminimumkan SSE pada data *latih*) belum tentu memberikan hasil terbaik pada data *uji*, komponen tren negatif yang diekstrapolasi terlalu jauh ke depan justru merugikan akurasi.
+
+### Perbandingan SES dan DES
+
+```{r}
+perbandingan <- data.frame(
+  Metode = c("SES (alpha optimum)", "DES (optimum)"),
+  SSE_train = c(SSEopt, SSE.desopt),
+  MSE_train = c(MSEopt, MSE.desopt),
+  SSE_test  = c(SSEtestingopt, sum(edopt^2, na.rm = TRUE)),
+  MSE_test  = c(MSEtestingopt, mean(edopt^2, na.rm = TRUE))
+)
+perbandingan
+```
+
+Berdasarkan tabel di atas, model **SES (alpha optimum)** memiliki MSE data latih yang lebih kecil (77,09 vs 80,79) maupun MSE data uji yang jauh lebih kecil (46,08 vs 89,39) dibanding DES (optimum). Hal ini masuk akal karena data PM10 pada kasus ini tidak menunjukkan tren yang konsisten/kuat, melainkan cenderung berfluktuasi di sekitar suatu level tertentu. Akibatnya, komponen tren yang dipaksakan oleh DES justru menyesatkan hasil peramalan, sedangkan SES yang hanya memodelkan level lebih sesuai dengan karakteristik data ini. Dengan demikian, **SES lebih baik dibanding DES** untuk data PM10 pada kasus ini.
+
+## Pemulusan Data Musiman
+
+Data PM10 harian berpotensi memiliki pola musiman mingguan, sehingga pada bagian ini data diubah menjadi deret waktu dengan frekuensi 7 (musiman mingguan).
+
+```{r}
+training.ts <- ts(training$pm10, frequency = 7)
+testing.ts  <- ts(testing$pm10, frequency = 7)
+```
+
+Eksplorasi dengan plot data deret waktu.
+
+```{r}
+plot(data.ts, col = "red", main = "Plot semua data")
+points(data.ts)
+
+plot(training.ts, col = "blue", main = "Plot data latih")
+points(training.ts)
+
+plot(testing.ts, col = "green", main = "Plot data uji")
+points(testing.ts)
+```
+
+Secara visual, fluktuasi musiman pada data PM10 ini terlihat relatif stabil (tidak membesar/mengecil seiring waktu), sehingga model Winter aditif diperkirakan cukup sesuai, namun model multiplikatif tetap dicoba sebagai pembanding.
+
+Metode Holt-Winter untuk peramalan data musiman menggunakan tiga persamaan pemulusan yaitu level, trend, dan komponen musiman, dengan parameter pemulusan alpha, beta, dan gamma. Metode Holt-Winter musiman terbagi menjadi dua, yaitu metode aditif dan metode multiplikatif.
+
+### Winter Aditif
+
+Perhitungan dengan model aditif dilakukan jika plot data asli menunjukkan fluktuasi musiman yang relatif stabil (konstan).
+
+#### Pemulusan
+
+```{r}
+winter1 <- HoltWinters(training.ts, alpha = 0.2, beta = 0.1, gamma = 0.1, seasonal = "additive")
+winter1$fitted
+
+xhat1 <- winter1$fitted[, 2]
+
+winter1.opt <- HoltWinters(training.ts, seasonal = "additive")
+winter1.opt
+winter1.opt$fitted
+
+xhat1.opt <- winter1.opt$fitted[, 2]
+```
+
+Model `winter1.opt` (parameter dioptimalkan otomatis) menghasilkan alpha=0,483 (mirip winter1 yang manual, 0,2, tapi lebih besar), beta≈0,001 (sangat kecil, artinya tren hampir tidak berubah dari waktu ke waktu), dan gamma=0,201 (komponen musiman cukup berpengaruh).
+
+#### Peramalan
+
+```{r}
+forecast1     <- predict(winter1, n.ahead = n_test)
+forecast1.opt <- predict(winter1.opt, n.ahead = n_test)
+```
+
+#### Plot Deret Waktu
+
+```{r}
+plot(training.ts, main = "Winter Aditif alpha=0.2;beta=0.1;gamma=0.1", type = "l",
+     col = "black")
+lines(xhat1, type = "l", col = "red")
+lines(xhat1.opt, type = "l", col = "blue")
+lines(forecast1, type = "l", col = "red")
+lines(forecast1.opt, type = "l", col = "blue")
+legend("topleft", c("Actual Data", "winter1", "winter1.opt"), cex = 0.5,
+       col = c("black", "red", "blue"), lty = 1)
+```
+
+Garis pemulusan (baik winter1 maupun winter1.opt) mengikuti pola naik-turun mingguan data aktual dengan cukup baik pada data latih.
+
+#### Akurasi Data Latih
+
+```{r}
+SSE1  <- winter1$SSE
+MSE1  <- winter1$SSE / length(training.ts)
+RMSE1 <- sqrt(MSE1)
+
+SSE1.opt  <- winter1.opt$SSE
+MSE1.opt  <- winter1.opt$SSE / length(training.ts)
+RMSE1.opt <- sqrt(MSE1.opt)
+
+akurasi_winter1_train <- data.frame(
+  Model_Winter = c("Winter1", "Winter1 optimal"),
+  Nilai_SSE = c(SSE1, SSE1.opt),
+  Nilai_MSE = c(MSE1, MSE1.opt),
+  Nilai_RMSE = c(RMSE1, RMSE1.opt)
+)
+akurasi_winter1_train
+```
+
+Pada data latih, Winter1 optimal (RMSE 9,12) sedikit lebih baik dibanding Winter1 dengan parameter manual alpha=0,2;beta=0,1;gamma=0,1 (RMSE 9,86).
+
+#### Akurasi Data Uji
+
+```{r}
+forecast1     <- data.frame(forecast1)
+testing.ts_df <- data.frame(testing.ts)
+selisih1      <- forecast1 - testing.ts_df
+SSEtesting1   <- sum(selisih1^2)
+MSEtesting1   <- SSEtesting1 / length(testing.ts_df)
+
+forecast1.opt <- data.frame(forecast1.opt)
+selisih1.opt  <- forecast1.opt - testing.ts_df
+SSEtesting1.opt <- sum(selisih1.opt^2)
+MSEtesting1.opt <- SSEtesting1.opt / length(testing.ts_df)
+
+akurasi_testing_winter1 <- data.frame(
+  Model = c("Winter1", "Winter1 Optimal"),
+  SSE   = c(SSEtesting1, SSEtesting1.opt),
+  MSE   = c(MSEtesting1, MSEtesting1.opt)
+)
+akurasi_testing_winter1
+```
+
+Pada data uji, Winter1 optimal jauh lebih unggul dengan SSE 3263,92 dibanding Winter1 manual dengan SSE 11916,55. Ini menegaskan bahwa parameter otomatis (alpha=0,483; beta≈0,001; gamma=0,201) lebih sesuai untuk data PM10 dibanding parameter manual alpha=0,2;beta=0,1;gamma=0,1.
+
+### Winter Multiplikatif
+
+Perhitungan dengan model multiplikatif dilakukan jika plot data asli menunjukkan fluktuasi musiman yang meningkat/menurun seiring waktu.
+
+#### Pemulusan
+
+```{r}
+winter2 <- HoltWinters(training.ts, alpha = 0.2, beta = 0.1, gamma = 0.1, seasonal = "multiplicative")
+winter2$fitted
+
+xhat2 <- winter2$fitted[, 2]
+
+winter2.opt <- HoltWinters(training.ts, seasonal = "multiplicative")
+winter2.opt
+winter2.opt$fitted
+
+xhat2.opt <- winter2.opt$fitted[, 2]
+```
+
+#### Peramalan
+
+```{r}
+forecast2     <- predict(winter2, n.ahead = n_test)
+forecast2.opt <- predict(winter2.opt, n.ahead = n_test)
+```
+
+#### Plot Deret Waktu
+
+```{r}
+plot(training.ts, main = "Winter Multiplikatif alpha=0.2;beta=0.1;gamma=0.1", type = "l",
+     col = "black")
+lines(xhat2, type = "l", col = "red")
+lines(xhat2.opt, type = "l", col = "blue")
+lines(forecast2, type = "l", col = "red")
+lines(forecast2.opt, type = "l", col = "blue")
+legend("topleft", c("Actual Data", "winter2", "winter2.opt"), cex = 0.5,
+       col = c("black", "red", "blue"), lty = 1)
+```
+
+#### Akurasi Data Latih
+
+```{r}
+SSE2  <- winter2$SSE
+MSE2  <- winter2$SSE / length(training.ts)
+RMSE2 <- sqrt(MSE2)
+
+SSE2.opt  <- winter2.opt$SSE
+MSE2.opt  <- winter2.opt$SSE / length(training.ts)
+RMSE2.opt <- sqrt(MSE2.opt)
+
+akurasi_winter2_train <- data.frame(
+  Model_Winter = c("Winter2", "Winter2 optimal"),
+  Nilai_SSE = c(SSE2, SSE2.opt),
+  Nilai_MSE = c(MSE2, MSE2.opt),
+  Nilai_RMSE = c(RMSE2, RMSE2.opt)
+)
+akurasi_winter2_train
+```
+
+Sama seperti model aditif, pada data latih Winter2 optimal (RMSE 9,12) sedikit lebih baik dibanding Winter2 manual (RMSE 9,91). Nilai RMSE keduanya juga hampir identik dengan model Winter aditif, menandakan kedua tipe musiman ini sama-sama mampu menangkap pola data latih dengan baik.
+
+#### Akurasi Data Uji
+
+```{r}
+forecast2      <- data.frame(forecast2)
+selisih2       <- forecast2 - testing.ts_df
+SSEtesting2    <- sum(selisih2^2)
+MSEtesting2    <- SSEtesting2 / length(testing.ts_df)
+
+forecast2.opt  <- data.frame(forecast2.opt)
+selisih2.opt   <- forecast2.opt - testing.ts_df
+SSEtesting2.opt <- sum(selisih2.opt^2)
+MSEtesting2.opt <- SSEtesting2.opt / length(testing.ts_df)
+
+akurasi_testing_winter2 <- data.frame(
+  Model = c("Winter2", "Winter2 Optimal"),
+  SSE   = c(SSEtesting2, SSEtesting2.opt),
+  MSE   = c(MSEtesting2, MSEtesting2.opt)
+)
+akurasi_testing_winter2
+```
+
+Pada data uji, Winter2 optimal juga jauh lebih baik (SSE 3780,20) dibanding Winter2 manual (SSE 11337,69), sejalan dengan hasil pada model Winter aditif. Namun, dibandingkan **Winter1 optimal (aditif)** yang SSE data ujinya 3263,92, **Winter2 optimal (multiplikatif)** dengan SSE 3780,20 sedikit lebih besar. Artinya, untuk data PM10 ini, **model Winter Aditif optimal sedikit lebih unggul** dibanding Winter Multiplikatif optimal — sesuai dugaan awal bahwa fluktuasi musiman datanya relatif stabil (bukan berskala proporsional terhadap level data), sehingga model aditif lebih cocok.
+
+## Kesimpulan
+
+**1. SMA vs DMA:** SMA (MAPE data uji 22,58%) jauh lebih baik dibanding DMA (MAPE data uji 125,43%), walaupun DMA lebih unggul di data latih. DMA gagal digeneralisasi karena mengekstrapolasi tren linear dari akhir data latih yang sedang menurun tajam, sehingga hasil ramalannya menyimpang jauh dari data aktual pada periode uji.
+
+**2. SES vs DES:** SES (alpha optimum) jelas lebih baik dibanding DES (optimum), baik pada data latih (MSE 77,09 vs 80,79) maupun data uji (MSE 46,08 vs 89,39). Ini karena data PM10 tidak memiliki tren yang konsisten, sehingga komponen tren yang dipaksakan oleh DES justru menyesatkan arah peramalan (di beberapa kombinasi parameter bahkan menghasilkan nilai ramalan negatif yang tidak masuk akal).
+
+**3. Winter Aditif vs Winter Multiplikatif:** Kedua model musiman menghasilkan performa yang mirip pada data latih, tetapi pada data uji Winter Aditif optimal (SSE 3263,92) sedikit lebih unggul dibanding Winter Multiplikatif optimal (SSE 3780,20). Ini konsisten dengan pola musiman PM10 yang fluktuasinya relatif stabil, bukan proporsional terhadap level datanya.
+
+**4. Metode terbaik secara keseluruhan:** Berdasarkan nilai SSE/MSE data uji, **metode Single Moving Average (SMA, m=4)** dan **Single Exponential Smoothing (SES, alpha optimum ≈ 0,508)** memberikan hasil peramalan yang **paling akurat** untuk data PM10 stasiun DKI1 (Bunderan HI), dengan SSE data uji masing-masing 1026,44 dan 1059,85 — jauh lebih kecil dibanding metode lain yang melibatkan tren (DMA, DES) maupun musiman (Winter Aditif/Multiplikatif). Alasannya, data PM10 harian pada periode ini cenderung berpola **stasioner/fluktuatif di sekitar suatu level** tanpa tren maupun musiman yang kuat dan konsisten, sehingga metode sederhana yang hanya memodelkan level data (SMA dan SES) justru lebih robust dan tidak "tertipu" oleh pergerakan tren atau musiman jangka pendek yang sebenarnya bersifat sementara/noise. Di antara keduanya, **SES (alpha optimum) sedikit lebih direkomendasikan** karena secara teori lebih adaptif (memberi bobot eksponensial menurun pada data historis) dan RMSE data ujinya (6,79) juga sudah cukup rendah dibandingkan skala data PM10 (rata-rata 45,64).
