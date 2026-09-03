@@ -1,1 +1,272 @@
+---
+title: "Latihan Pertemuan 3"
+author: "Aurelia Fury"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: false
+    theme: paper
+    code_folding: show
+---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Packages
+
+```{r}
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+```
+
+# Impor Data
+
+```{r}
+# Data Latihan 1 - Market Share & Price (20 periode)
+period <- 1:20
+market_share <- c(3.63,4.20,3.33,4.54,2.89,4.87,4.90,5.29,6.18,7.20,
+                   7.25,6.09,6.80,8.65,8.43,8.29,7.18,7.90,8.45,8.23)
+price <- c(0.97,0.95,0.99,0.91,0.98,0.90,0.89,0.86,0.85,0.82,
+           0.79,0.83,0.81,0.77,0.76,0.80,0.83,0.79,0.76,0.78)
+data1 <- data.frame(period, market_share, price)
+str(data1)
+```
+
+```{r}
+# Data Latihan 2 - Sales & Advertising (40 tahun)
+year <- 1975:2014
+sales <- c(11.7,12.0,12.3,12.8,13.1,13.6,13.9,14.4,14.7,15.3,
+           15.5,15.8,16.1,16.6,16.9,16.7,16.9,17.4,17.6,17.9,
+           18.0,17.9,18.0,18.2,18.2,18.3,18.6,19.2,19.3,19.5,
+           19.2,19.3,19.5,20.0,20.0,19.9,19.8,19.9,20.2,21.0)
+advertising <- c(9.4,9.6,10.0,10.4,10.8,10.9,11.7,12.2,12.5,12.9,
+                  13.0,13.2,13.8,14.2,14.6,14.4,15.0,15.4,15.7,15.9,
+                  15.9,16.0,16.3,16.2,16.8,17.3,17.6,18.1,18.3,18.5,
+                  18.7,18.9,19.2,20.0,20.0,20.3,20.4,21.0,21.5,22.1)
+data2 <- data.frame(year, sales, advertising)
+str(data2)
+```
+
+# Latihan 1 - Distributed Lag Model (Market Share terhadap Price)
+
+Model distributed lag menyatakan bahwa peubah dependen $Y$ (Market Share) dipengaruhi oleh peubah independen $X$ (Price) baik pada waktu sekarang maupun beberapa periode ke belakang ($X_t, X_{t-1}, X_{t-2}, ...$).
+
+## Pembagian Data
+
+```{r}
+train1 <- data1[1:15, ]
+test1  <- data1[16:20, ]
+
+train1.ts <- ts(train1)
+test1.ts  <- ts(test1)
+data1.ts  <- ts(data1)
+```
+
+## Pemodelan (Lag = 2)
+
+Pemodelan model Regression with Distributed Lag dengan R dapat menggunakan `dLagM::dlm()`. Sebagai awal, akan dicoba model dengan panjang lag $q=2$.
+
+```{r}
+model1.dlm <- dlm(x = train1$price, y = train1$market_share, q = 2)
+summary(model1.dlm)
+```
+
+```{r}
+AIC(model1.dlm)
+BIC(model1.dlm)
+```
+
+## Peramalan dan Akurasi
+
+```{r}
+fore1.dlm <- forecast(model = model1.dlm, x = test1$price, h = 5)
+fore1.dlm
+```
+
+```{r}
+mape1.dlm <- MAPE(fore1.dlm$forecasts, test1$market_share)
+mape1.dlm #akurasi data uji
+```
+
+```{r}
+GoF(model1.dlm) #akurasi data latih
+```
+
+## Lag Optimum
+
+Untuk menentukan panjang lag optimum, digunakan `finiteDLMauto()` yang membandingkan berbagai panjang lag berdasarkan nilai AIC.
+
+```{r}
+finiteDLMauto(formula = market_share ~ price,
+              data = data.frame(train1), q.min = 1, q.max = 10,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+
+Lag optimum dipilih berdasarkan nilai **AIC terkecil** pada tabel di atas. Perhatikan bahwa baris $q=7$ sampai $q=10$ menunjukkan AIC $=-\infty$ — ini bukan model yang valid, melainkan tanda **model jenuh/*overfit*** (jumlah parameter yang diduga terlalu banyak dibanding sisa derajat bebas data latih). Nilai AIC valid terkecil sesungguhnya berada pada $q=6$ (AIC $=-4,064$), sehingga $q=6$ inilah yang dipilih sebagai lag optimum.
+
+```{r}
+# Lag optimum berdasarkan finiteDLMauto() (AIC valid terkecil, bukan baris -Inf yang overfit)
+q_opt1 <- 6
+model1.dlm.opt <- dlm(x = train1$price, y = train1$market_share, q = q_opt1)
+summary(model1.dlm.opt)
+```
+
+```{r}
+AIC(model1.dlm.opt)
+BIC(model1.dlm.opt)
+```
+
+```{r}
+fore1.dlm.opt <- forecast(model = model1.dlm.opt, x = test1$price, h = 5)
+mape1.dlm.opt <- MAPE(fore1.dlm.opt$forecasts, test1$market_share)
+mape1.dlm.opt #akurasi data uji
+```
+
+```{r}
+GoF(model1.dlm.opt) #akurasi data latih
+```
+
+## Perbandingan Model Latihan 1
+
+```{r}
+akurasi1 <- matrix(c(mape1.dlm, mape1.dlm.opt))
+row.names(akurasi1) <- c(paste0("DLM (q=2)"), paste0("DLM (q optimum)"))
+colnames(akurasi1) <- "MAPE"
+akurasi1
+```
+
+Model dengan **MAPE data uji terkecil** adalah model terbaik untuk kasus Market Share terhadap Price ini. Model $q=6$ (lag optimum) memiliki MAPE data uji $\approx 6,37\%$, sedikit lebih kecil dibanding model $q=2$ ($\text{MAPE}=7,06\%$), sehingga model dengan lag optimum ($q=6$) yang dipilih sebagai **model terbaik** untuk Latihan 1. Namun perlu dicatat, model $q=6$ hanya memiliki **1 derajat bebas sisaan** (residual standard error dihitung dari 9 observasi dengan 8 parameter) — model ini hampir jenuh (*near-saturated*) dan estimasi koefisiennya sangat tidak stabil, sehingga keunggulan MAPE-nya perlu diinterpretasikan dengan hati-hati (rawan *overfitting*, bukan murni karena model lebih baik secara struktural).
+
+```{r}
+par(mfrow = c(1,1))
+plot(test1$price, test1$market_share, type = "b", col = "black",
+     xlab = "Price", ylab = "Market Share", main = "Perbandingan Hasil Peramalan - Latihan 1")
+points(test1$price, fore1.dlm$forecasts, col = "red");      lines(test1$price, fore1.dlm$forecasts, col = "red")
+points(test1$price, fore1.dlm.opt$forecasts, col = "blue"); lines(test1$price, fore1.dlm.opt$forecasts, col = "blue")
+legend("topright", c("Aktual", "DLM (q=2)", "DLM (q optimum)"),
+       lty = 1, col = c("black", "red", "blue"), cex = 0.8)
+```
+
+# Latihan 2 - Autoregressive Distributed Lag / ARDL (Sales terhadap Advertising)
+
+Model ARDL menyatakan bahwa peubah dependen $Y$ (Sales) dipengaruhi oleh peubah independen $X$ (Advertising) baik pada waktu sekarang maupun lag-nya ($X_t, X_{t-1}, ..., X_{t-q}$), **dan juga** oleh lag dari dirinya sendiri ($Y_{t-1}, ..., Y_{t-p}$).
+
+## Pembagian Data
+
+```{r}
+train2 <- data2[1:30, ]
+test2  <- data2[31:40, ]
+
+train2.ts <- ts(train2)
+test2.ts  <- ts(test2)
+data2.ts  <- ts(data2)
+```
+
+## Pemodelan (p = 1, q = 1)
+
+Pemodelan Autoregressive/ARDL dengan R dapat menggunakan `dLagM::ardlDlm()`.
+
+```{r}
+model2.ardl <- ardlDlm(formula = sales ~ advertising, data = train2, p = 1, q = 1)
+summary(model2.ardl)
+```
+
+```{r}
+AIC(model2.ardl)
+BIC(model2.ardl)
+```
+
+## Peramalan dan Akurasi
+
+```{r}
+fore2.ardl <- forecast(model = model2.ardl, x = t(as.matrix(test2$advertising)), h = 10)
+fore2.ardl
+```
+
+```{r}
+mape2.ardl <- MAPE(fore2.ardl$forecasts, test2$sales)
+mape2.ardl #akurasi data uji
+```
+
+```{r}
+GoF(model2.ardl) #akurasi data latih
+```
+
+## Orde (p,q) Optimum
+
+Untuk menentukan orde $(p,q)$ optimum digunakan `ardlBoundOrders()`, yang mencari kombinasi $p$ (lag Y) dan $q$ (lag X) dengan AIC terkecil.
+
+```{r}
+model2.ardl.opt <- ardlBoundOrders(data = data.frame(train2), ic = "AIC",
+                                    formula = sales ~ advertising)
+model2.ardl.opt
+```
+
+```{r}
+min_p <- c()
+for (i in 1:length(model2.ardl.opt$Stat.table)) {
+  min_p[i] <- min(model2.ardl.opt$Stat.table[[i]], na.rm = TRUE)
+}
+q_opt2 <- which(min_p == min(min_p, na.rm = TRUE))
+p_opt2 <- which(model2.ardl.opt$Stat.table[[q_opt2]] ==
+                  min(model2.ardl.opt$Stat.table[[q_opt2]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt2, "p_optimum" = p_opt2, "AIC" = model2.ardl.opt$min.Stat)
+```
+
+Kombinasi $(p,q)$ dengan AIC terkecil pada tabel di atas adalah orde optimum. Selanjutnya dibangun model ARDL dengan orde tersebut — **sesuaikan nilai `p_opt2` dan `q_opt2` di bawah ini** dengan hasil pencarian yang muncul saat kamu Knit (di kode di atas nilainya sudah otomatis diambil dari `p_opt2` dan `q_opt2`).
+
+```{r}
+model2.ardl.terbaik <- ardlDlm(formula = sales ~ advertising, data = train2,
+                                p = p_opt2, q = q_opt2)
+summary(model2.ardl.terbaik)
+```
+
+```{r}
+AIC(model2.ardl.terbaik)
+BIC(model2.ardl.terbaik)
+```
+
+```{r}
+fore2.ardl.opt <- forecast(model = model2.ardl.terbaik, x = t(as.matrix(test2$advertising)), h = 10)
+mape2.ardl.opt <- MAPE(fore2.ardl.opt$forecasts, test2$sales)
+mape2.ardl.opt #akurasi data uji
+```
+
+```{r}
+GoF(model2.ardl.terbaik) #akurasi data latih
+```
+
+## Perbandingan Model Latihan 2
+
+```{r}
+akurasi2 <- matrix(c(mape2.ardl, mape2.ardl.opt))
+row.names(akurasi2) <- c("ARDL (p=1,q=1)", "ARDL (p,q optimum)")
+colnames(akurasi2) <- "MAPE"
+akurasi2
+```
+
+Sama seperti Latihan 1, model dengan **MAPE data uji terkecil** dipilih sebagai model ARDL terbaik. Hasil pencarian `ardlBoundOrders()` menunjukkan orde optimum berdasarkan AIC data latih adalah $p=9$ (lag Advertising) dan $q=5$ (lag Sales/AR), dengan AIC $=-52,878$ — jauh lebih kecil dibanding model awal $(p=1,q=1)$ yang AIC-nya $-19,182$. Namun, saat dievaluasi pada **data uji**, hasilnya justru terbalik: model $(p=1,q=1)$ memiliki MAPE $4,85\%$, sedangkan model "optimum" $(p=9,q=5)$ memiliki MAPE $7,32\%$ — **lebih buruk**, meskipun AIC data latihnya jauh lebih kecil. Ini adalah kasus **overfitting** klasik: model $(p=9,q=5)$ menggunakan 16 parameter yang diduga dari hanya 21 observasi efektif (derajat bebas sisa $=5$), sehingga model tersebut menyesuaikan data latih hampir sempurna ($R^2=0,998$) tetapi gagal digeneralisasi ke data baru. Oleh karena itu, **model ARDL$(p=1,q=1)$ yang lebih sederhana justru menjadi model terbaik** untuk kasus Sales terhadap Advertising ini — bukan model hasil pencarian AIC otomatis. Ini menunjukkan pentingnya selalu memvalidasi model "optimum" berdasarkan AIC dengan akurasi pada data uji, bukan cuma mengandalkan AIC data latih.
+
+```{r}
+par(mfrow = c(1,1))
+plot(test2$advertising, test2$sales, type = "b", col = "black",
+     xlab = "Advertising", ylab = "Sales", main = "Perbandingan Hasil Peramalan - Latihan 2")
+points(test2$advertising, fore2.ardl$forecasts, col = "red");     lines(test2$advertising, fore2.ardl$forecasts, col = "red")
+points(test2$advertising, fore2.ardl.opt$forecasts, col = "blue"); lines(test2$advertising, fore2.ardl.opt$forecasts, col = "blue")
+legend("topleft", c("Aktual", "ARDL (p=1,q=1)", "ARDL (p,q optimum)"),
+       lty = 1, col = c("black", "red", "blue"), cex = 0.6)
+```
+
+# Kesimpulan
+
+**Latihan 1 (Market Share ~ Price):** Berdasarkan pencarian `finiteDLMauto()`, lag optimum berada pada $q=6$ (AIC $=-4,064$; baris $q=7$ sampai $q=10$ diabaikan karena AIC $=-\infty$, tanda model jenuh/overfit). Model distributed lag dengan $q=6$ menghasilkan MAPE data uji $6,37\%$, sedikit lebih baik dibanding model baseline $q=2$ (MAPE $7,06\%$). Dengan demikian, **model DLM dengan $q=6$ dipilih sebagai model terbaik**, meskipun perlu dicatat model ini memiliki derajat bebas sisaan yang sangat kecil (hanya 1), sehingga hasil estimasinya kurang stabil dan idealnya divalidasi lebih lanjut dengan data yang lebih banyak.
+
+**Latihan 2 (Sales ~ Advertising):** Pencarian `ardlBoundOrders()` memberikan orde optimum $(p=9,q=5)$ berdasarkan AIC data latih ($-52,878$), jauh lebih kecil dibanding model baseline $(p=1,q=1)$ ($\text{AIC}=-19,182$). Namun, pada data uji, model $(p=9,q=5)$ justru memiliki MAPE lebih besar ($7,32\%$) dibanding model baseline $(p=1,q=1)$ ($\text{MAPE}=4,85\%$) — indikasi kuat *overfitting* karena model $(p=9,q=5)$ menggunakan terlalu banyak parameter relatif terhadap jumlah data latih yang tersisa. Dengan demikian, **model ARDL$(1,1)$ (bukan hasil pencarian AIC otomatis) yang dipilih sebagai model terbaik** untuk kasus Sales terhadap Advertising ini, karena performanya jauh lebih baik dan stabil pada data uji.
+
+**Catatan umum:** Kedua latihan ini menunjukkan bahwa **pemilihan model berdasarkan AIC pada data latih saja tidak cukup** — model dengan AIC terbaik belum tentu menjadi model dengan generalisasi terbaik pada data baru (data uji). Validasi akurasi pada data uji (di sini menggunakan MAPE) tetap diperlukan sebagai penentu akhir model terbaik, terutama ketika ukuran data latih relatif kecil dibanding jumlah parameter yang diduga.
